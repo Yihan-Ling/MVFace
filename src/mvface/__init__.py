@@ -1,10 +1,11 @@
-"""Separate import heavy modules (the torch model classes) and light modules so the torch-free subpackage `multi_view.data` still imports in an environment without torch
+"""Lazily expose the torch-heavy model classes so importing `mvface` (or the
+`mvface.data` subpackage) does not eagerly import torch/torchvision.
 """
 
 HEAVY = {
-    "RGBDPoseResNet50": "multi_view.backbone",
-    "MultiViewBackbone": "multi_view.backbone",
-    "MultiViewLandmark3D": "multi_view.mv_model",
+    "RGBDPoseResNet50": "mvface.backbone",
+    "MultiViewBackbone": "mvface.backbone",
+    "MultiViewLandmark3D": "mvface.model",
 }
 
 __all__ = list(HEAVY)

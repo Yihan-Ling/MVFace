@@ -4,8 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from multi_view.backbone import MultiViewBackbone
-from multi_view.decoder import MultiViewDecoder
+from mvface.backbone import MultiViewBackbone
+from mvface.decoder import MultiViewDecoder
 
 
 class MultiViewLandmark3D(nn.Module):

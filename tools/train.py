@@ -1,6 +1,6 @@
 """
 Example:
-    .venv/bin/python scripts/train_early_fusion.py \
+    .venv/bin/python tools/train.py \
         --root data/facescape/virtual_camera_data --epochs 40 --bs 2 --lr 1e-4
 """
 
@@ -15,16 +15,16 @@ import torch
 from torch.utils.data import DataLoader
 
 from _init_paths import REPO_ROOT
-from multi_view.data.facescape_dataset import (
+from mvface.data.facescape_dataset import (
     MultiViewFaceScape, discover_subject_folders, subject_train_val_split)
-from multi_view.losses import decoder_losses, mpjpe_mm
-from multi_view.model import MultiViewLandmark3D
+from mvface.losses import decoder_losses, mpjpe_mm
+from mvface.model import MultiViewLandmark3D
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--root", default=str(REPO_ROOT / "data/facescape/virtual_camera_data"))
-    p.add_argument("--assets", default=str(REPO_ROOT / "multi_view/assets"))
+    p.add_argument("--assets", default=str(REPO_ROOT / "src/mvface/assets"))
     p.add_argument("--out", default=str(REPO_ROOT / "output/early_fusion"))
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--bs", type=int, default=2)

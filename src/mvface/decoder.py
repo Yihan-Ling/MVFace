@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from multi_view.geometry import triangulate_dlt_batch
+from mvface.geometry import triangulate_dlt_batch
 
 
 class ProjectiveAttention(nn.Module):
