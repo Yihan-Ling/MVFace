@@ -1,0 +1,9 @@
+{
+  "SPACE_CENTER": [
+    3.5253312004397017,
+    -12.5462063171191,
+    11.85145345729774
+  ],
+  "SPACE_SIZE": 218.6063893416141,
+  "source": "bilinear_v1.6_id_front mean; box from virtual_camera_data"
+}
