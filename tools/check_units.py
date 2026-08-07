@@ -26,6 +26,7 @@ import torch
 import _init_paths  # noqa: F401
 
 from mvface import geometry_lf as G
+from mvface.losses import mpjpe_mm
 
 
 def _sample_depth(depth_raw: torch.Tensor, uv: torch.Tensor):
@@ -126,7 +127,9 @@ def check_geometry_units(
            f"median {e5.median():.4f}mm (tol {tol_mm})")
 
     # 6) MPJPE self-consistency + face-scale IOD (iBUG outer eye corners 36 / 45)
-    zero = float(G.mpjpe(lm3[None], lm3[None])) # FIXME: geometry has not mpjpe function
+    # lm3 is already in mm here, so pass scale=1.0 
+    # (mpjpe_mm's default scale assumes metre inputs and would rescale mm -> mm*1000).
+    zero = mpjpe_mm(lm3[None], lm3[None], scale=1.0)
     iod = float(torch.linalg.norm(lm3[36] - lm3[45]))
     report("6_mpjpe_and_iod", zero < 1e-6 and (60 < iod < 140),
            f"mpjpe(gt,gt)={zero:.2e}, IOD={iod:.1f}mm (expect face-scale ~96)")
