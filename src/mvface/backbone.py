@@ -13,8 +13,19 @@ class RGBDPoseResNet50(nn.Module):
         deconv_channels: int = 256,
     ) -> None:
         super().__init__()
-        rn = resnet50(weights=None) # random initialized weight for now, may change in the future
-        rn.conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False) # swap for 4 channel
+        # rn = resnet50(weights=None) # random initialized weight for now, may change in the future
+        # rn.conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False) # swap for 4 channel
+        
+        rn = resnet50(weights="IMAGENET1K_V2")  # ImageNet-pretrained for stable features
+        # Swap conv1 for 4-channel (RGBD) input, keeping pretrained RGB weights
+        # and zero-initializing the new depth channel so depth starts as a
+        # no-op residual and the RGB path behaves exactly as pretrained.
+        old_conv = rn.conv1
+        new_conv = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        with torch.no_grad():
+            new_conv.weight[:, :3] = old_conv.weight       # copy RGB filters
+            new_conv.weight[:, 3:].zero_()                 # zero depth filter
+        rn.conv1 = new_conv
 
         # Include Stage 1-5
         self.conv1 = rn.conv1
