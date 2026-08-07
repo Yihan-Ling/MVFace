@@ -8,8 +8,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from src.geometry import triangulate_dlt_batch
-from src.geometry_lf import triangulate_dlt_depth_batch
+from mvface.geometry import triangulate_dlt_batch
+from mvface.geometry_lf import triangulate_dlt_depth_batch
 
 
 # ── depth sampling ────────────────────────────────────────────────────────────

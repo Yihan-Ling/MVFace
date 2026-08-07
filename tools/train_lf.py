@@ -8,9 +8,11 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from data.facescape_multiview import FaceScapeMultiView as FaceScapeMultiViewV2
-from src.losses import decoder_losses, mpjpe_mm
-from src.model import MultiViewLandmark3D
+import _init_paths  # noqa: F401
+
+from mvface.data.facescape_multiview import FaceScapeMultiView as FaceScapeMultiViewV2
+from mvface.losses import decoder_losses, mpjpe_mm
+from mvface.model import MultiViewLandmark3D
 
 
 def make_cfg(args):

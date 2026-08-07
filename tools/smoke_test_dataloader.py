@@ -20,6 +20,7 @@ import types
 import numpy as np
 import cv2
 import torch
+import _init_paths  # noqa: F401
 
 # ── minimal cfg shim so we don't need the full MVGFormer config ───────────────
 def make_cfg():
@@ -37,7 +38,7 @@ def make_cfg():
 
 
 def main():
-    from data.facescape_multiview import FaceScapeMultiView, NUM_LANDMARKS
+    from mvface.data.facescape_multiview import FaceScapeMultiView, NUM_LANDMARKS
 
     cfg = make_cfg()
     ds = FaceScapeMultiView(cfg, image_set='train', is_train=True)

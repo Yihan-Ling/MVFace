@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import torch
 
-import geometry as G
+import _init_paths  # noqa: F401
+
+from mvface import geometry_lf as G
 
 
 def _sample_depth(depth_raw: torch.Tensor, uv: torch.Tensor):
@@ -124,7 +126,7 @@ def check_geometry_units(
            f"median {e5.median():.4f}mm (tol {tol_mm})")
 
     # 6) MPJPE self-consistency + face-scale IOD (iBUG outer eye corners 36 / 45)
-    zero = float(G.mpjpe(lm3[None], lm3[None]))
+    zero = float(G.mpjpe(lm3[None], lm3[None])) # FIXME: geometry has not mpjpe function
     iod = float(torch.linalg.norm(lm3[36] - lm3[45]))
     report("6_mpjpe_and_iod", zero < 1e-6 and (60 < iod < 140),
            f"mpjpe(gt,gt)={zero:.2e}, IOD={iod:.1f}mm (expect face-scale ~96)")
@@ -138,9 +140,9 @@ def check_geometry_units(
 if __name__ == "__main__":
     # ---- pull ONE capture from your dataloader and pass its fields ----
     # Adjust the import/instantiation to your actual dataset (memory: dataset at
-    # src/data/facescape_multiview.py, imports use the src.* prefix).
+    # src/mvface/data/facescape_multiview.py, imports use the mvface.* prefix).
     #
-    #   from src.data.facescape_multiview import FaceScapeMultiView
+    #   from mvface.data.facescape_multiview import FaceScapeMultiView
     #   ds = FaceScapeMultiView(split="val", ...)          # your usual args
     #   b  = ds[0]                                          # one capture (dict)
     #   check_geometry_units(
