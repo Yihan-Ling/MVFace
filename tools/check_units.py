@@ -25,7 +25,7 @@ import torch
 
 import _init_paths  # noqa: F401
 
-from mvface import geometry_lf as G
+from mvface import geometry
 from mvface.losses import mpjpe_mm
 
 
@@ -79,7 +79,7 @@ def check_geometry_units(
     # 1) projection matches stored 2D
     proj_err = []
     for i in range(V):
-        uv_i = G.project(lm3, P[i])                       # (J, 2)
+        uv_i = geometry.project(lm3, P[i])                       # (J, 2)
         e = torch.linalg.norm(uv_i - lm2[i], dim=-1)      # (J,)
         proj_err.append(e[vis_b[i]] if vis_b[i].any() else e)
     proj_err = torch.cat(proj_err)
@@ -92,13 +92,13 @@ def check_geometry_units(
     vis_JV = vis_b.permute(1, 0).contiguous().to(dt)     # (J, V)
 
     # 2) 2D-only round trip
-    X_2d = G.triangulate_dlt_batch(uv_JV, P_JV, weights=vis_JV)
+    X_2d = geometry.triangulate_dlt_batch(uv_JV, P_JV, weights=vis_JV)
     e2 = torch.linalg.norm(X_2d - lm3, dim=-1)
     report("2_triangulate_2d_roundtrip", e2.median() < tol_mm,
            f"median {e2.median():.4f}mm (tol {tol_mm})")
 
     # 3) camera-space depth is sane positive metric
-    cam_d = G.camera_depth(lm3, P_JV)                     # (J, V)
+    cam_d = geometry.camera_depth(lm3, P_JV)                     # (J, V)
     cam_d_vis = cam_d[vis_JV.bool()]
     report("3_camera_depth_sane",
            bool((cam_d_vis > 0).all()) and (50 < cam_d_vis.median() < 5000),
@@ -120,8 +120,8 @@ def check_geometry_units(
 
     # 5) depth-augmented solve still recovers GT (units consistent inside solve)
     dw = (meas_valid.to(dt) * vis_JV)
-    X_d = G.triangulate_dlt_batch(uv_JV, P_JV, weights=vis_JV,
-                                  depths=meas_d, depth_weights=dw)
+    X_d = geometry.triangulate_dlt_batch(uv_JV, P_JV, weights=vis_JV,
+                                         depths=meas_d, depth_weights=dw)
     e5 = torch.linalg.norm(X_d - lm3, dim=-1)
     report("5_triangulate_with_depth", e5.median() < tol_mm,
            f"median {e5.median():.4f}mm (tol {tol_mm})")

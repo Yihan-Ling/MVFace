@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from torch import nn
 
 from mvface.geometry import triangulate_dlt_batch
-from mvface.geometry_lf import triangulate_dlt_depth_batch
 
 
 # ── depth sampling ────────────────────────────────────────────────────────────
@@ -251,7 +250,7 @@ class DecoderLayer(nn.Module):
         w_rgb   = conf.permute(0, 2, 1).reshape(B * Q, N)
         d       = depths.permute(0, 2, 1).reshape(B * Q, N)
         w_depth = depth_w.permute(0, 2, 1).reshape(B * Q, N)
-        X = triangulate_dlt_depth_batch(pts, Ps, d, w_rgb, w_depth)
+        X = triangulate_dlt_batch(pts, Ps, w_rgb, depths=d, depth_weights=w_depth)
         return X.reshape(B, Q, 3)
 
 

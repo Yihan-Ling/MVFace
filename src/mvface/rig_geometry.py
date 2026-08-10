@@ -9,9 +9,7 @@ Convention:
 Units: keep the WORLD frame in metres
 so results land in the same frame the model was trained on (landmarks ~0.1 m, MM_PER_UNIT=1000).
 RealSense depth is native mm -> multiply by 1e-3 before using as `depths`.
-"""
 
-"""
 rig_calib.json format:
 {
   "world_frame": "custom",
@@ -30,6 +28,10 @@ from __future__ import annotations
 import json
 import numpy as np
 import torch
+
+# Re-exported for the rig side: camera_depth accepts a shared (V,3,4) rig stack as
+# well as the per-point (M,V,3,4) form the decoder passes.
+from mvface.geometry import camera_depth as camera_depth_of  # noqa: F401
 
 
 def build_proj(K, R, t) -> torch.Tensor:
@@ -65,11 +67,3 @@ def load_rig(path: str):
 def proj_stack(rig) -> torch.Tensor:
     """(V,3,4) stack of P matrices, ordered as in the rig list."""
     return torch.stack([build_proj(c["K"], c["R"], c["t"]) for c in rig], dim=0)
-
-
-def camera_depth_of(points_3d: torch.Tensor, Ps: torch.Tensor) -> torch.Tensor:
-    """Camera-space z of world points per view: p3 . [X;1]. (M,3),(V,3,4)->(M,V)."""
-    ones = points_3d.new_ones(points_3d.shape[0], 1)
-    Xh = torch.cat([points_3d, ones], dim=-1)           # (M,4)
-    p3 = Ps[:, 2, :]                                     # (V,4)
-    return Xh @ p3.T                                     # (M,V)
