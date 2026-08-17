@@ -29,8 +29,10 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--bs", type=int, default=2)
     p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--grad-clip", type=float, default=1.0,
+    p.add_argument("--grad-clip", type=float, default=1e-3,
                    help="max grad-norm for clipping; guards against NaN blow-ups")
+    p.add_argument("--lambda-2d", type=float, default=1e-4,
+                   help="weight on the 2D reprojection loss term")
     p.add_argument("--num-layers", type=int, default=4)
     p.add_argument("--img-size", type=int, default=256)
     p.add_argument("--val-frac", type=float, default=0.2)
@@ -47,7 +49,7 @@ def move(batch, device):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, lambda_2d):
     """Return (val_loss, val_mpjpe_mm) averaged over the loader (per-sample)."""
     model.eval()
     loss_sum, err_sum, n = 0.0, 0.0, 0
@@ -57,7 +59,7 @@ def evaluate(model, loader, device):
         preds_3d, preds_2d = model(batch["rgbd"], batch["proj"], hw)
         b = batch["rgbd"].shape[0]
         losses = decoder_losses(preds_3d, preds_2d, batch["landmarks_3d"],
-                                batch["landmarks_2d"], batch["vis"])
+                                batch["landmarks_2d"], batch["vis"], lambda_2d=lambda_2d)
         loss_sum += float(losses["total"]) * b
         err_sum += float(mpjpe_mm(preds_3d[-1], batch["landmarks_3d"])) * b
         n += b
@@ -124,7 +126,8 @@ def main():
             hw = (batch["rgbd"].shape[-2], batch["rgbd"].shape[-1])
             preds_3d, preds_2d = model(batch["rgbd"], batch["proj"], hw)
             losses = decoder_losses(preds_3d, preds_2d, batch["landmarks_3d"],
-                                    batch["landmarks_2d"], batch["vis"])
+                                    batch["landmarks_2d"], batch["vis"],
+                                    lambda_2d=args.lambda_2d)
             loss = losses["total"]
             # Skip a batch whose loss is already non-finite (do not backward NaN).
             if not torch.isfinite(loss):
@@ -143,7 +146,7 @@ def main():
         sched.step()
 
         train_loss = running / max(len(train_ld) - skipped, 1)
-        val_loss, val_mpjpe = evaluate(model, val_ld, args.device)
+        val_loss, val_mpjpe = evaluate(model, val_ld, args.device, args.lambda_2d)
         sec = time.time() - t0
         skip_note = f"  skipped {skipped}" if skipped else ""
         logprint(f"epoch {epoch:3d}  train_loss {train_loss:8.3f}  "

@@ -10,6 +10,8 @@ from PIL import Image
 from scipy.ndimage import binary_fill_holes
 from torch.utils.data import Dataset
 
+from mvface.units import MM_PER_METRE
+
 
 def _base_identity(name: str) -> str:
     """Identity of a subject folder. Seperate from subject variants: `<id>_<variant>`
@@ -70,8 +72,8 @@ class MultiViewFaceScape(Dataset):
 
     ```
     rgbd          (N, 4, H, W)  RGB in [0,1] + normalized depth as the 4th channel
-    proj          (N, 3, 4)     projection matrix P = K @ [R|t] per view
-    landmarks_3d  (68, 3)       GT in the WORLD frame (shared across views)
+    proj          (N, 3, 4)     projection matrix P = K @ [R|t] per view (t in metres)
+    landmarks_3d  (68, 3)       GT in the WORLD frame, metres (shared across views)
     landmarks_2d  (N, 68, 2)    GT pixel landmarks per view
     vis           (N, 68)       per-view visibility (geometric occlusion test)
     ```
@@ -150,13 +152,18 @@ class MultiViewFaceScape(Dataset):
             # rgb is (H,W,3); transpose to (3, H, W) first and append depth_n as channel 4.
             x = np.concatenate([rgb.transpose(2, 0, 1), depth_n[None]], axis=0).astype(np.float32)
 
-            # Build projection matrix P = K @ [R|t]. P transforms 3D coordinates into the view's 2D pixel
-            P = K @ np.hstack([R, t[:, None]])
+            # Build projection matrix P = K @ [R|t] in raw (mm) units for the consistency
+            # checks below, since lm_world/lm_cam/t are still in mm at this point.
+            P_mm = K @ np.hstack([R, t[:, None]])
 
             # assert camera -> world inverse still correct, verify R, t
             assert np.allclose((lm_cam - t) @ R, lm_world, atol=1e-3)
             # end-to-end assert world lanmarks project onto the correct pixel with P, verify P
-            assert np.allclose(_project_np(lm_world, P), uv, atol=1.0)
+            assert np.allclose(_project_np(lm_world, P_mm), uv, atol=1.0)
+
+            # Output P uses t scaled to metres to match the scaled landmarks_3d below;
+            # the perspective divide cancels the shared scale factor so pixels are unaffected.
+            P = K @ np.hstack([R, (t / MM_PER_METRE)[:, None]])
 
             # Visibility
             H, W = depth.shape
@@ -177,7 +184,7 @@ class MultiViewFaceScape(Dataset):
         sample = {
             "rgbd": torch.from_numpy(np.stack(rgbd)).float(),
             "proj": torch.from_numpy(np.stack(proj)).float(),
-            "landmarks_3d": torch.from_numpy(lm_world).float(),
+            "landmarks_3d": torch.from_numpy(lm_world / MM_PER_METRE).float(),  # mm -> m
             "landmarks_2d": torch.from_numpy(np.stack(lm2d)).float(),
             "vis": torch.from_numpy(np.stack(vis)).float(),
         }
