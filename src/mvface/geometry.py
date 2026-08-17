@@ -66,18 +66,27 @@ def triangulate_dlt(
     X = Xh[:3]/Xh[3]
     return X
 
+def _normalize_rows(a: torch.Tensor) -> torch.Tensor:
+    """Scale each row to unit L2 norm, with a floor so an all-zero row stays finite."""
+    return a / a.norm(dim=-1, keepdim=True).clamp(min=1e-9)
 
 def triangulate_dlt_batch(
     points_2d: torch.Tensor,
     Ps: torch.Tensor,
     weights: torch.Tensor | None = None,
+    depths: torch.Tensor | None = None,             # (M, V) eye-space z, WORLD units
+    depth_weights: torch.Tensor | None = None,      # (M, V) per-view depth reliability
+    lambda_depth: float = 1.0,                      # global depth-vs-2D trade-off
 ) -> torch.Tensor:
-    """Batched DLT triangulation
+    """Batched DLT triangulation, optionally augmented with per-view depth rows
 
     Args:
         points_2d: (M, V, 2) pixel coordinate of the same world point.
         Ps: (M, V, 3, 4) projection matrices P = K @ Rt, one per view.
         weights: (M, V) optional per-view confidence.
+        depths: (M, V)  metric z-depth in mm (eye-space z along optical axis)
+        depth_weights: (M, V)  depth reliability
+        lambda_depth: global depth-vs-2D trade-off
 
     Returns:
         (M, 3) triangulated 3D world points.
@@ -89,20 +98,56 @@ def triangulate_dlt_batch(
     u = points_2d[..., 0:1]
     v = points_2d[..., 1:2]
 
-    row_u = u * p3 - p1
-    row_v = v * p3 - p2
+    row_u = _normalize_rows(u * p3 - p1)
+    row_v = _normalize_rows(v * p3 - p2)
 
     if weights is not None:
         w = weights[..., None]
         row_u = row_u * w
         row_v = row_v * w
 
-    A = torch.cat([row_u, row_v], dim=1)
-    U, S, Vh = torch.linalg.svd(A)
+    rows = [row_u, row_v]
+
+    # optional depth rows
+    if depths is not None:
+        # depth constraint row:  [p3_xyz, p3_w - d] . Xh = 0
+        row_d = torch.cat(
+            [p3[..., :3], p3[..., 3:4] - depths[..., None]],
+            dim=-1,
+        )   # (M, V, 4)
+        row_d = _normalize_rows(row_d)
+        if depth_weights is not None:
+            row_d = row_d * (lambda_depth * depth_weights[..., None])
+        elif lambda_depth != 1.0:
+            row_d = row_d * lambda_depth
+        rows.append(row_d)
+
+    A = torch.cat(rows, dim=1)
+    _, _, Vh = torch.linalg.svd(A)
     Xh = Vh[:, -1, :]
-    
+
     # Dehomogenize with a signed floor on the homogeneous coord: a near-zero w (point near infinity / degenerate rays) would otherwise blow X up to Inf.
     w = Xh[:, 3:4]
     w_safe = w.abs().clamp(min=1e-8) * torch.where(w < 0, -1.0, 1.0)
     X = Xh[:, :3] / w_safe
     return X
+
+
+def camera_depth(points_3d: torch.Tensor, Ps: torch.Tensor) -> torch.Tensor:
+    """Camera-space z (eye-space depth) of each world point in each view.
+
+    p3 . [X;1] equals eye-space z when P = K @ [R|t] with K's last row [0,0,1].
+    Use it to form depth residuals  r = camera_depth(X) - measured_depth  for the
+    robust reweighting / correction loop (weights_depth = vis * valid * rho(r)).
+
+    Args:
+        points_3d: (M, 3) world points.
+        Ps: (M, V, 3, 4) per-point projection matrices, or (V, 3, 4) for a shared
+            rig (broadcast over M).
+    Returns:
+        (M, V) predicted eye-space depth per view (same units as world coords).
+    """
+    ones = points_3d.new_ones(points_3d.shape[0], 1)
+    Xh = torch.cat([points_3d, ones], dim=-1)            # (M, 4)
+    p3 = Ps[..., 2, :]                                   # (M, V, 4) or (V, 4)
+    return (p3 * Xh[:, None, :]).sum(dim=-1)             # (M, V)
