@@ -7,7 +7,6 @@ Example:
 import _init_paths  # noqa: F401
 import argparse
 import csv
-import json
 import time
 from pathlib import Path
 
@@ -15,10 +14,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from _init_paths import REPO_ROOT
+from mvface.checkpoint import save_checkpoint
 from mvface.data.facescape_dataset import (
     MultiViewFaceScape, discover_subject_folders, subject_train_val_split)
 from mvface.losses import decoder_losses, mpjpe_mm
 from mvface.model import MultiViewLandmark3D
+from mvface.output_dir import OutputDir
 
 
 def parse_args():
@@ -41,6 +42,10 @@ def parse_args():
     p.add_argument("--limit", type=int, default=0, help="cap #subjects (0=all) for quick smoke tests")
     p.add_argument("--no-depth", action="store_true", help="RGB-only ablation arm")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite a non-empty run directory without asking")
+    p.add_argument("--resume", action="store_true",
+                   help="continue an existing run from checkpoints/last.pth")
     return p.parse_args()
 
 
@@ -70,38 +75,51 @@ def evaluate(model, loader, device, lambda_2d):
 def main():
     args = parse_args()
     torch.manual_seed(args.seed)
-    out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
+    # OutputDir owns the layout. An explicit flag wins; otherwise an occupied
+    # directory prompts (or refuses, when not on a TTY).
+    on_exists = "force" if args.force else ("resume" if args.resume else "ask")
+    run = OutputDir(args.out).create(on_exists=on_exists)
+    resuming = run.action == "resumed"
 
-    # Record per-epoch metrics: metrics.csv (structured) + train.log (raw console).
-    logf = open(out / "train.log", "w")
+    # Append when resuming so the existing history is not truncated.
+    mode = "a" if resuming else "w"
+    logf = open(run.train_log, mode)
 
     def logprint(msg):
         print(msg)
         logf.write(msg + "\n"); logf.flush()
 
-    csvf = open(out / "metrics.csv", "w", newline="")
+    csvf = open(run.train_csv, mode, newline="")
     writer = csv.writer(csvf)
-    writer.writerow(["epoch", "lr", "train_loss", "val_loss", "val_mpjpe",
-                     "skipped", "sec"])
-    csvf.flush()
+    if not resuming:
+        writer.writerow(["epoch", "lr", "train_loss", "val_loss", "val_mpjpe",
+                         "skipped", "sec"])
+        csvf.flush()
 
-    subs = discover_subject_folders(args.root)
-    if args.limit:
-        subs = subs[: args.limit]
-    train_ids, val_ids = subject_train_val_split(subs, args.val_frac, args.seed)
-    logprint(f"subjects: {len(subs)}  train {len(train_ids)}  val {len(val_ids)}  "
-             f"depth={'OFF' if args.no_depth else 'ON'}  -> split.json")
+    if resuming:
+        # The frozen split is authoritative -- re-deriving it could silently move
+        # subjects between train and val mid-run if --limit/--val-frac changed.
+        split = run.read_split()
+        if split is None:
+            raise SystemExit(f"cannot resume {run.root}: no split.csv")
+        train_ids, val_ids = split
+        logprint(f"resuming {run.root}  train {len(train_ids)}  val {len(val_ids)}")
+    else:
+        subs = discover_subject_folders(args.root)
+        if args.limit:
+            subs = subs[: args.limit]
+        train_ids, val_ids = subject_train_val_split(subs, args.val_frac, args.seed)
+        logprint(f"subjects: {len(subs)}  train {len(train_ids)}  val {len(val_ids)}  "
+                 f"depth={'OFF' if args.no_depth else 'ON'}  -> {run.root}")
 
-    # Record subject train-val split
-    (out / "split.json").write_text(json.dumps({
-        "root": str(args.root),
-        "seed": args.seed,
-        "val_frac": args.val_frac,
-        "limit": args.limit,
-        "n_subjects": len(subs),
-        "train_ids": train_ids,
-        "val_ids": val_ids,
-    }, indent=2))
+        # Frozen subject train/val split (one row per subject) + the run's identity
+        # record: args, git sha, torch/CUDA versions, resolved data root.
+        run.write_split(train_ids, val_ids)
+        run.write_config(vars(args),
+                         data_root=str(Path(args.root).resolve()),
+                         n_subjects=len(subs),
+                         n_train=len(train_ids),
+                         n_val=len(val_ids))
 
 
     train_ds = MultiViewFaceScape(args.root, train_ids)
@@ -117,8 +135,32 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.epochs)
 
-    best = float("inf")
-    for epoch in range(1, args.epochs + 1):
+    start_epoch, best = 0, float("inf")
+    if resuming:
+        ck = torch.load(run.checkpoint("last"), map_location=args.device,
+                        weights_only=False)
+        model.load_state_dict(ck["model"])
+        # Adam moments and the cosine schedule's position: without these the run
+        # restarts its optimizer state and its learning-rate curve.
+        if "opt" in ck:
+            opt.load_state_dict(ck["opt"])
+        if "sched" in ck:
+            sched.load_state_dict(ck["sched"])
+        else:
+            logprint("  warning: no scheduler state in last.pth -- lr curve restarts")
+        start_epoch = ck.get("epoch", 0)
+        best = ck.get("best", ck.get("val_mpjpe", float("inf")))
+        prev_epochs = (run.read_config() or {}).get("args", {}).get("epochs")
+        if prev_epochs and prev_epochs != args.epochs:
+            logprint(f"  warning: --epochs {args.epochs} differs from the original "
+                     f"{prev_epochs}; the cosine schedule shape changes")
+        logprint(f"  from epoch {start_epoch + 1}/{args.epochs}, best so far {best:.2f} mm")
+        if start_epoch >= args.epochs:
+            logprint(f"nothing to do: {start_epoch} epochs already complete")
+            csvf.close(); logf.close()
+            return
+
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         model.train()
         t0, running, skipped = time.time(), 0.0, 0
         for it, batch in enumerate(train_ld):
@@ -159,11 +201,13 @@ def main():
 
         ckpt = {"model": model.state_dict(), "epoch": epoch, "val_mpjpe": val_mpjpe,
                 "val_loss": val_loss, "args": vars(args)}
-        torch.save(ckpt, out / "last.pth")
         if val_mpjpe < best:
             best = val_mpjpe
-            torch.save(ckpt, out / "best.pth")
-    logprint(f"done. best val MPJPE {best:.2f} mm  ->  {out/'best.pth'}")
+            save_checkpoint(ckpt, run.checkpoint("best"))   # lean: for eval / deploy
+        # last.pth additionally carries what a resume needs.
+        save_checkpoint({**ckpt, "opt": opt.state_dict(), "sched": sched.state_dict(),
+                         "best": best}, run.checkpoint("last"))
+    logprint(f"done. best val MPJPE {best:.2f} mm  ->  {run.checkpoint('best')}")
     csvf.close(); logf.close()
 
 

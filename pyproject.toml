@@ -13,6 +13,7 @@ dependencies = [
     "pillow",
     "torch",
     "torchvision",
+    "matplotlib",   # tools/viz_pred_vs_gt.py
 ]
 
 [tool.setuptools.packages.find]

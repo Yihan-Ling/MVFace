@@ -12,6 +12,22 @@ from torch.utils.data import Dataset
 
 from mvface.units import MM_PER_METRE
 
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def denormalize_rgb(rgb_chw: torch.Tensor) -> torch.Tensor:
+    """Undo the ImageNet normalization -> displayable RGB in [0,1].
+
+    Args:
+        rgb_chw: (..., 3, H, W) normalized RGB, e.g. `sample["rgbd"][:, :3]`.
+    Returns:
+        same shape, clamped to [0, 1], safe to hand to imshow.
+    """
+    mean = torch.as_tensor(IMAGENET_MEAN, device=rgb_chw.device).view(3, 1, 1)
+    std = torch.as_tensor(IMAGENET_STD, device=rgb_chw.device).view(3, 1, 1)
+    return (rgb_chw * std + mean).clamp(0, 1)
+
 
 def _base_identity(name: str) -> str:
     """Identity of a subject folder. Seperate from subject variants: `<id>_<variant>`
@@ -149,8 +165,11 @@ class MultiViewFaceScape(Dataset):
             # normalize depth
             depth_n = (depth - med) / self.depth_scale
 
+            # ImageNet-normalize RGB
+            rgb_n = (rgb - IMAGENET_MEAN) / IMAGENET_STD
+
             # rgb is (H,W,3); transpose to (3, H, W) first and append depth_n as channel 4.
-            x = np.concatenate([rgb.transpose(2, 0, 1), depth_n[None]], axis=0).astype(np.float32)
+            x = np.concatenate([rgb_n.transpose(2, 0, 1), depth_n[None]], axis=0).astype(np.float32)
 
             # Build projection matrix P = K @ [R|t] in raw (mm) units for the consistency
             # checks below, since lm_world/lm_cam/t are still in mm at this point.
