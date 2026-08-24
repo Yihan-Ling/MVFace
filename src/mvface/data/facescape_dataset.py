@@ -10,6 +10,24 @@ from PIL import Image
 from scipy.ndimage import binary_fill_holes
 from torch.utils.data import Dataset
 
+from mvface.units import MM_PER_METRE
+
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def denormalize_rgb(rgb_chw: torch.Tensor) -> torch.Tensor:
+    """Undo the ImageNet normalization -> displayable RGB in [0,1].
+
+    Args:
+        rgb_chw: (..., 3, H, W) normalized RGB, e.g. `sample["rgbd"][:, :3]`.
+    Returns:
+        same shape, clamped to [0, 1], safe to hand to imshow.
+    """
+    mean = torch.as_tensor(IMAGENET_MEAN, device=rgb_chw.device).view(3, 1, 1)
+    std = torch.as_tensor(IMAGENET_STD, device=rgb_chw.device).view(3, 1, 1)
+    return (rgb_chw * std + mean).clamp(0, 1)
+
 
 def _base_identity(name: str) -> str:
     """Identity of a subject folder. Seperate from subject variants: `<id>_<variant>`
@@ -70,8 +88,8 @@ class MultiViewFaceScape(Dataset):
 
     ```
     rgbd          (N, 4, H, W)  RGB in [0,1] + normalized depth as the 4th channel
-    proj          (N, 3, 4)     projection matrix P = K @ [R|t] per view
-    landmarks_3d  (68, 3)       GT in the WORLD frame (shared across views)
+    proj          (N, 3, 4)     projection matrix P = K @ [R|t] per view (t in metres)
+    landmarks_3d  (68, 3)       GT in the WORLD frame, metres (shared across views)
     landmarks_2d  (N, 68, 2)    GT pixel landmarks per view
     vis           (N, 68)       per-view visibility (geometric occlusion test)
     ```
@@ -147,16 +165,24 @@ class MultiViewFaceScape(Dataset):
             # normalize depth
             depth_n = (depth - med) / self.depth_scale
 
-            # rgb is (H,W,3); transpose to (3, H, W) first and append depth_n as channel 4.
-            x = np.concatenate([rgb.transpose(2, 0, 1), depth_n[None]], axis=0).astype(np.float32)
+            # ImageNet-normalize RGB
+            rgb_n = (rgb - IMAGENET_MEAN) / IMAGENET_STD
 
-            # Build projection matrix P = K @ [R|t]. P transforms 3D coordinates into the view's 2D pixel
-            P = K @ np.hstack([R, t[:, None]])
+            # rgb is (H,W,3); transpose to (3, H, W) first and append depth_n as channel 4.
+            x = np.concatenate([rgb_n.transpose(2, 0, 1), depth_n[None]], axis=0).astype(np.float32)
+
+            # Build projection matrix P = K @ [R|t] in raw (mm) units for the consistency
+            # checks below, since lm_world/lm_cam/t are still in mm at this point.
+            P_mm = K @ np.hstack([R, t[:, None]])
 
             # assert camera -> world inverse still correct, verify R, t
             assert np.allclose((lm_cam - t) @ R, lm_world, atol=1e-3)
             # end-to-end assert world lanmarks project onto the correct pixel with P, verify P
-            assert np.allclose(_project_np(lm_world, P), uv, atol=1.0)
+            assert np.allclose(_project_np(lm_world, P_mm), uv, atol=1.0)
+
+            # Output P uses t scaled to metres to match the scaled landmarks_3d below;
+            # the perspective divide cancels the shared scale factor so pixels are unaffected.
+            P = K @ np.hstack([R, (t / MM_PER_METRE)[:, None]])
 
             # Visibility
             H, W = depth.shape
@@ -177,7 +203,7 @@ class MultiViewFaceScape(Dataset):
         sample = {
             "rgbd": torch.from_numpy(np.stack(rgbd)).float(),
             "proj": torch.from_numpy(np.stack(proj)).float(),
-            "landmarks_3d": torch.from_numpy(lm_world).float(),
+            "landmarks_3d": torch.from_numpy(lm_world / MM_PER_METRE).float(),  # mm -> m
             "landmarks_2d": torch.from_numpy(np.stack(lm2d)).float(),
             "vis": torch.from_numpy(np.stack(vis)).float(),
         }
