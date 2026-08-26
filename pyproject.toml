@@ -20,4 +20,4 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-mvface = ["assets/*.npy", "assets/*.json"]
+mvface = ["assets/*.npy", "assets/*.npz", "assets/*.json"]
