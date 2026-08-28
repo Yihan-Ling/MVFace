@@ -17,7 +17,7 @@ from tqdm import tqdm
 if tuple(int(x) for x in OpenGL.__version__.split(".")[:3]) < (3, 1, 9):
     raise ImportError(
         f"PyOpenGL {OpenGL.__version__} crashes when rendering textured meshes. "
-        'Run `bash tools/setup_render.sh`, or `pip install --upgrade "PyOpenGL>=3.1.9"`.'
+        'Run `bash setup_render.sh`, or `pip install --upgrade "PyOpenGL>=3.1.9"`.'
     )
 
 from _init_paths import REPO_ROOT

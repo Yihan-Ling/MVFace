@@ -60,8 +60,8 @@ needed on a machine that renders FaceScape meshes into training data, never for
 training, evaluation or benchmarking. Install it with one command:
 
 ```bash
-bash tools/setup_render.sh              # into ./.venv
-bash tools/setup_render.sh <path/venv>  # into another venv, e.g. on a cluster
+bash setup_render.sh              # into ./.venv
+bash setup_render.sh <path/venv>  # into another venv, e.g. on a cluster
 ```
 
 That installs the `[render]` extra (pyrender, trimesh, OpenCV, tqdm), then

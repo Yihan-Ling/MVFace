@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Data generation only (tools/render_views.py); training and eval never need it.
-# Install with:  bash tools/setup_render.sh
+# Install with:  bash setup_render.sh
 
 render = [
     "pyrender>=0.1.45",         # offscreen GL rendering (EGL headless)

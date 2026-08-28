@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install the FaceScape data-generation stack in one command:
 #
-#     bash tools/setup_render.sh                 # into ./.venv
-#     bash tools/setup_render.sh /path/to/venv   # into another venv
+#     bash setup_render.sh                 # into ./.venv
+#     bash setup_render.sh /path/to/venv   # into another venv
 #
 # Two pip passes are unavoidable. pyrender hard-pins PyOpenGL==3.1.0, which
 # dies in glGenTextures (ctypes.ArgumentError) on Python 3.14 as soon as a
@@ -12,7 +12,7 @@
 # has to be upgraded afterwards, on its own.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="${1:-$REPO_ROOT/.venv}"
 PY="$VENV/bin/python"
 
