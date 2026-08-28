@@ -9,9 +9,16 @@ from dataclasses import dataclass
 import numpy as np
 import cv2
 import trimesh
+import OpenGL
 import pyrender          # run with PYOPENGL_PLATFORM=egl for headless GPU
 from PIL import Image
 from tqdm import tqdm
+
+if tuple(int(x) for x in OpenGL.__version__.split(".")[:3]) < (3, 1, 9):
+    raise ImportError(
+        f"PyOpenGL {OpenGL.__version__} crashes when rendering textured meshes. "
+        'Run `bash tools/setup_render.sh`, or `pip install --upgrade "PyOpenGL>=3.1.9"`.'
+    )
 
 from _init_paths import REPO_ROOT
 from mvface.data.augment import AugConfig, MultiViewAugmentor
