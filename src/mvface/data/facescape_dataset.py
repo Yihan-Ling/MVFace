@@ -36,6 +36,22 @@ def _base_identity(name: str) -> str:
     return name.split("_")[0]
 
 
+def limit_to_subjects(folder_names, n_subjects: int):
+    """A cap on subjects identities, not on item folders. 
+    """
+    if n_subjects <= 0:
+        return list(folder_names)
+    kept, seen = [], set()
+    for name in folder_names:
+        base = _base_identity(name)
+        if base not in seen:
+            if len(seen) >= n_subjects:
+                continue                  # identity past the cap: drop its items
+            seen.add(base)
+        kept.append(name)
+    return kept
+
+
 def subject_train_val_split(subject_ids, val_frac: float = 0.2, seed: int = 0):
     """Partition subject ids into (train, val) with no subjects in both. Randomized by `seed`
     """
