@@ -16,7 +16,8 @@ from torch.utils.data import DataLoader
 from _init_paths import REPO_ROOT
 from mvface.checkpoint import save_checkpoint
 from mvface.data.facescape_dataset import (
-    MultiViewFaceScape, discover_subject_folders, subject_train_val_split)
+    MultiViewFaceScape, _base_identity, discover_subject_folders,
+    limit_to_subjects, subject_train_val_split)
 from mvface.losses import decoder_losses, mpjpe_mm
 from mvface.model import MultiViewLandmark3D
 from mvface.output_dir import OutputDir
@@ -39,7 +40,9 @@ def parse_args():
     p.add_argument("--val-frac", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--workers", type=int, default=4)
-    p.add_argument("--limit", type=int, default=0, help="cap #subjects (0=all) for quick smoke tests")
+    p.add_argument("--limit", type=int, default=0,
+                   help="cap #subjects/identities (0=all) for quick smoke tests; "
+                        "keeps ALL expressions and variants of those subjects")
     p.add_argument("--no-depth", action="store_true", help="RGB-only ablation arm")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--force", action="store_true",
@@ -107,10 +110,21 @@ def main():
     else:
         subs = discover_subject_folders(args.root)
         if args.limit:
-            subs = subs[: args.limit]
+            subs = limit_to_subjects(subs, args.limit)
         train_ids, val_ids = subject_train_val_split(subs, args.val_frac, args.seed)
-        logprint(f"subjects: {len(subs)}  train {len(train_ids)}  val {len(val_ids)}  "
-                 f"depth={'OFF' if args.no_depth else 'ON'}  -> {run.root}")
+        n_subj = len({_base_identity(s) for s in subs})
+
+        if not train_ids or not val_ids:
+            side = "train" if not train_ids else "val"
+            raise SystemExit(
+                f"empty {side} split: {n_subj} subject(s) / {len(subs)} items at "
+                f"--val-frac {args.val_frac} gave train {len(train_ids)}, "
+                f"val {len(val_ids)}.\n"
+                f"An identity-disjoint split needs at least two subjects. "
+                f"Raise --limit (it caps subjects, not items) or lower --val-frac.")
+        logprint(f"items: {len(subs)}  subjects: {n_subj}  train {len(train_ids)}  "
+                 f"val {len(val_ids)}  depth={'OFF' if args.no_depth else 'ON'}  "
+                 f"-> {run.root}")
 
         # Frozen subject train/val split (one row per subject) + the run's identity
         # record: args, git sha, torch/CUDA versions, resolved data root.

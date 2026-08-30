@@ -30,9 +30,26 @@ def denormalize_rgb(rgb_chw: torch.Tensor) -> torch.Tensor:
 
 
 def _base_identity(name: str) -> str:
-    """Identity of a subject folder. Seperate from subject variants: `<id>_<variant>`
+    """Identity of a subject folder. Seperate from subject variants and
+    expressions: `<id>`, `<id>_<variant>` or `<id>_<expression>_<variant>`.
     """
     return name.split("_")[0]
+
+
+def limit_to_subjects(folder_names, n_subjects: int):
+    """A cap on subjects identities, not on item folders. 
+    """
+    if n_subjects <= 0:
+        return list(folder_names)
+    kept, seen = [], set()
+    for name in folder_names:
+        base = _base_identity(name)
+        if base not in seen:
+            if len(seen) >= n_subjects:
+                continue                  # identity past the cap: drop its items
+            seen.add(base)
+        kept.append(name)
+    return kept
 
 
 def subject_train_val_split(subject_ids, val_frac: float = 0.2, seed: int = 0):
@@ -52,17 +69,25 @@ def discover_subject_folders(root):
     """Discover all valid subject folders
     
     Returns:
-        list[str]: List of valid folder names, ordered by (subject_id, variant).
+        list[str]: List of valid folder names, ordered by
+            (subject_id, expression_id, variant_id).
     """
     root = Path(root)
     def ok(n: str) -> bool:
-        """folder only valid if the names is '<subject_id>' or '<subject_id>_<variant_id>'"""
+        """Folder is valid if its name is '<subject_id>', '<subject_id>_<variant_id>'
+        or '<subject_id>_<expression_id>_<variant_id>' -- every field all-digits.
+        """
         parts = n.split("_")
-        return len(parts) in (1, 2) and all(p.isdigit() for p in parts)
+        return len(parts) in (1, 2, 3) and all(p.isdigit() for p in parts)
     def key(n: str):
-        """sort key by subject_id, then by variant_id"""
-        parts = n.split("_")
-        return (int(parts[0]), int(parts[1]) if len(parts) == 2 else -1)
+        """sort key by subject_id, then expression_id, then variant_id
+        """
+        parts = [int(p) for p in n.split("_")]
+        if len(parts) == 1:
+            return (parts[0], -1, -1)
+        if len(parts) == 2:
+            return (parts[0], -1, parts[1])
+        return (parts[0], parts[1], parts[2])
     return sorted((d.name for d in root.iterdir() if d.is_dir() and ok(d.name)), key=key)
 
 

@@ -17,6 +17,7 @@ Examples:
 import _init_paths  # noqa: F401
 import argparse
 import csv
+import gc
 import json
 import time
 from datetime import datetime
@@ -139,7 +140,16 @@ def bench_subjects(root, val_ids, n) -> list[str]:
 def run_timing(model, root, subjects, bench_bs, iters, warmup, device, workers) -> dict:
     ds = MultiViewFaceScape(str(root), subjects)
     loader = DataLoader(ds, batch_size=bench_bs, shuffle=False, num_workers=workers)
-    batch = {k: v.to(device) for k, v in next(iter(loader)).items()}
+    it = iter(loader)
+    batch = {k: v.to(device) for k, v in next(it).items()}
+
+    # Release the loader's worker PROCESSES before timing. They sit idle but still
+    # compete for CPU, and a CUDA kernel launch is CPU work -- with workers alive
+    # the launch queue runs dry and the GPU idles between kernels, costing ~20%
+    # (measured 56 Hz with 4 workers alive vs 68 Hz released, same batch).
+    del it, loader, ds
+    gc.collect()
+
     hw = (batch["rgbd"].shape[-2], batch["rgbd"].shape[-1])
     B, N, _, H, W = batch["rgbd"].shape
 
@@ -163,6 +173,7 @@ def run_timing(model, root, subjects, bench_bs, iters, warmup, device, workers) 
 
     return {
         "precision": "fp32",
+        "bench_loader_released": True,   # workers torn down before timing
         "bench_bs": B,
         "bench_views": N,
         "bench_input_hw": [H, W],
